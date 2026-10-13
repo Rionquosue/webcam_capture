@@ -11,8 +11,8 @@ import threading
 import time
 from typing import Callable
 
-from PySide6.QtCore import QLibraryInfo, QPluginLoader, QTimer, Qt, Slot
-from PySide6.QtGui import QCloseEvent, QImage, QPixmap, QTransform
+from PySide6.QtCore import QEvent, QLibraryInfo, QPluginLoader, QTimer, Qt, Slot
+from PySide6.QtGui import QCloseEvent, QIcon, QImage, QPixmap, QTransform
 from PySide6.QtMultimedia import QCamera, QCameraFormat, QMediaCaptureSession, QMediaDevices, QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -538,13 +538,31 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("auto", "windows", "ffmpeg"), default="auto",
                         help="Auto prefers Windows Media Foundation when installed.")
+    parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     backend = configure_backend(arguments.backend)
+    if sys.platform == "win32":
+        import ctypes
+        set_app_id = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+        set_app_id.argtypes = [ctypes.c_wchar_p]
+        set_app_id.restype = ctypes.c_long
+        set_app_id("WebcamCapture.Desktop")
     application = QApplication([sys.argv[0]])
     application.setApplicationName("Webcam Capture")
+    application.setDesktopFileName("webcam_capture")
+    icon = QIcon(str(Path(__file__).resolve().parent / "assets" / "webcam_capture.ico"))
+    if arguments.smoke_test and icon.isNull():
+        raise RuntimeError("The bundled application icon is missing or unreadable.")
+    application.setWindowIcon(icon)
     window = WebcamApp(backend_name=backend)
     window.show()
-    raise SystemExit(application.exec())
+    if arguments.smoke_test:
+        QTimer.singleShot(250, window.close)
+    result = application.exec()
+    # Release multimedia widgets while QApplication and its backend still exist.
+    window.deleteLater()
+    application.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    raise SystemExit(result)
 
 
 if __name__ == "__main__":

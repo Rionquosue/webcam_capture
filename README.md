@@ -10,6 +10,39 @@ Qt's native video widget. Python keeps a shared frame handle for snapshots;
 it does not resize, convert, or JPEG-encode every preview frame. There is no
 software 30 FPS cap. This replaces the earlier Tkinter/OpenCV implementation.
 
+## Packaged downloads
+
+Get the packages from [Releases](https://github.com/Rionquosue/webcam_capture/releases/latest).
+They include Python and the required Python libraries.
+
+**Windows 11, Intel/AMD 64-bit:** extract `WebcamCapture-Windows-x64.zip` into
+a permanent folder, then double-click `Create-Desktop-Shortcut.cmd`. Launch
+the **Webcam Capture** desktop shortcut, or open `WebcamCapture.exe` directly.
+Keep the `_internal` folder beside the executable. The custom icon is embedded
+in the executable and assigned to the shortcut. No administrator access is
+needed. Run the shortcut installer again if you move the app folder.
+
+**Linux, Intel/AMD 64-bit:** the AppImage and portable TAR.GZ are built on
+Ubuntu 22.04 for desktop systems with glibc 2.35 or newer.
+
+```bash
+chmod +x WebcamCapture-Linux-x86_64.AppImage
+./WebcamCapture-Linux-x86_64.AppImage
+```
+
+The portable TAR.GZ also provides a desktop shortcut installer: extract it
+into a permanent folder, then run `./create-desktop-shortcut.sh` inside the
+`WebcamCapture` folder. Launch `AppRun` or the desktop shortcut. This package
+works without FUSE. The AppImage can also run without FUSE using
+`--appimage-extract-and-run`. Graphics drivers, a desktop session, and webcam
+device access are supplied by the laptop.
+
+The same camera and export features are available in both packages. Camera
+compatibility and received frame rate still depend on each laptop's driver.
+
+The icon was created using image generation; its source and Windows ICO are
+in `assets/`. The icon prompt is saved in `assets/icon_prompt.txt`.
+
 ## Windows 11 setup
 
 Open PowerShell in this repository's folder:
@@ -147,6 +180,24 @@ or the platform's normal desktop plugin to run in a desktop session.
 
 `webcam_capture.py` contains the Qt interface and native camera integration.
 `capture_core.py` contains capture storage, labeling, and JPEG export.
+
+## Building packages
+
+The **Build desktop packages** GitHub Actions workflow builds on native
+Windows and Ubuntu runners, runs the tests, verifies bundled startup and
+shortcut creation, and publishes the successful packages as one release.
+It runs on pushes to `main` and can be started manually.
+
+For a local Windows build, from the source folder:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File packaging\build_windows.ps1 -Python .\.venv\Scripts\python.exe
+```
+
+For a local Linux build, install `requirements-build.txt` in your Python
+environment and run `bash packaging/build_linux.sh`. The CI workflow lists
+the desktop library prerequisites. Packages are written to `dist/`.
 
 Implementation references:
 

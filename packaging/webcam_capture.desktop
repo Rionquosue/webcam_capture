@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Webcam Capture
+Comment=Capture photos and export a labeled image set
+Exec=WebcamCapture
+Icon=webcam_capture
+Terminal=false
+Categories=Graphics;Photography;
+StartupWMClass=WebcamCapture

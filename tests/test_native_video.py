@@ -3,6 +3,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -212,6 +214,13 @@ class NativeVideoTests(unittest.TestCase):
         self.assertFalse(self.window.capture_button.isEnabled())
         self.window.toggle_camera()
         self.assertIsNone(self.window.camera)
+
+    def test_entrypoint_loads_icon_and_closes_cleanly_from_another_directory(self):
+        entrypoint = Path(__file__).resolve().parents[1] / "webcam_capture.py"
+        result = subprocess.run([sys.executable, str(entrypoint), "--smoke-test"],
+                                cwd=self.temporary.name, capture_output=True, text=True,
+                                timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def running_camera(self, features):
         camera = Mock(spec=QCamera)
