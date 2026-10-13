@@ -392,7 +392,7 @@ class WebcamApp(QMainWindow):
     def _sync_controls(self, *args) -> None:
         opened = self.camera is not None
         fresh = self.latest_frame.isValid() and time.monotonic() - self.last_frame_at <= 2
-        manual = bool(opened and self.camera.supportedFeatures() & QCamera.Feature.ExposureTime)
+        manual = bool(opened and self.camera.supportedFeatures() & QCamera.Feature.ManualExposureTime)
         signature = (opened, fresh, self.busy, manual,
                      len(self.session.photos), self.photo_list.currentRow(), self.device_input.count())
         if signature == self._status_signature:

@@ -6,12 +6,12 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtMultimedia import QVideoFrame, QVideoFrameFormat, QtVideo
+from PySide6.QtMultimedia import QCamera, QVideoFrame, QVideoFrameFormat, QtVideo
 from PySide6.QtWidgets import QApplication
 
 from capture_core import compress_jpeg
@@ -212,6 +212,36 @@ class NativeVideoTests(unittest.TestCase):
         self.assertFalse(self.window.capture_button.isEnabled())
         self.window.toggle_camera()
         self.assertIsNone(self.window.camera)
+
+    def running_camera(self, features):
+        camera = Mock(spec=QCamera)
+        camera.supportedFeatures.return_value = features
+        camera.isActive.return_value = True
+        camera.minimumExposureTime.return_value = 1 / 1000
+        camera.maximumExposureTime.return_value = 1
+        self.window.camera = camera
+        self.window._sync_controls()
+        return camera
+
+    def test_running_camera_with_manual_exposure_receives_frames_and_changes_exposure(self):
+        camera = self.running_camera(QCamera.Feature.ManualExposureTime)
+        self.assertTrue(self.window.exposure_input.isEnabled())
+        self.send_frame(width=320, height=180)
+        self.assertTrue(self.window.capture_button.isEnabled())
+        self.assertEqual(self.window.actual_size, (320, 180))
+        self.window.exposure_input.setCurrentIndex(2)
+        camera.setManualExposureTime.assert_called_once_with(1 / 120)
+        self.window.exposure_input.setCurrentIndex(0)
+        camera.setAutoExposureTime.assert_called_once_with()
+
+    def test_running_camera_without_manual_exposure_still_receives_frames(self):
+        camera = self.running_camera(QCamera.Feature.ExposureCompensation)
+        self.assertFalse(self.window.exposure_input.isEnabled())
+        self.send_frame(width=320, height=180)
+        self.assertTrue(self.window.capture_button.isEnabled())
+        self.assertEqual(self.window.actual_size, (320, 180))
+        self.window.exposure_input.setCurrentIndex(2)
+        camera.setManualExposureTime.assert_not_called()
 
 
 if __name__ == "__main__":
