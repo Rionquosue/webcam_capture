@@ -94,11 +94,20 @@ for an explicit selection. The Windows backend is specific to Windows.
    Modes come from the camera's advertised formats. The app prefers an
    advertised 1920 x 1080 mode near 60 FPS when available. Close the camera
    before changing its mode. **Camera default** is also available.
-2. Click **Capture photo**, up to 15 times. Select a photo to review it;
+2. Click **Capture photo** or press **Space**, up to 15 times. Space capture
+   works only while this app window is active; it does not run while hidden,
+   minimized, or behind another app. Typing spaces in the label and directory
+   fields still works normally. Select a photo to review it;
    **Remove selected** lets you replace a photo.
 3. Enter a **Set label**, choose an existing export **Directory**, and click
    **Export set**. JPEG encoding and any required size reduction happen now.
-4. The status shows the saved folder. **Clear set** starts a new set.
+4. After a successful export, the saved image folder opens and the captured
+   photo list is cleared from memory, ready for the next set. Export failure
+   keeps the photos for retry.
+
+The last valid export directory is remembered between launches. Both Browse
+and typed directory paths are supported. The selected parent directory is
+remembered, rather than the newly created image-set subfolder.
 
 The app prefers the supplied webcam's USB vendor/product pair `1BCF:0050`
 when the backend exposes it in the device ID. The hardware ID does not specify
@@ -139,16 +148,19 @@ the camera's exposure automatically when opening it.
   bytes. Small review thumbnails are separate; their resizing does not change
   the original pixels. Capture does not perform JPEG encoding or downscaling.
 - Fifteen 1920 x 1080 RGB captures use about 93 MB, plus camera, preview,
-  thumbnail, and export working memory. Photos stay in RAM until cleared or
-  the app closes; RAM storage does not survive a crash.
+  thumbnail, and export working memory. Photos stay in RAM until successful
+  export, manual clearing, or closing the app; RAM storage does not survive
+  a crash.
 - Compression runs only during export. Images above a 2560-pixel longest edge
   are reduced with aspect ratio preserved. JPEG quality decreases from 95
   toward 60; dimensions decrease further if necessary. The actual encoded
   byte count must be **strictly below 2,000,000 bytes** for every file.
-- Original captures remain unchanged after export, including on failure.
-  Repeated exports start from the original pixels, avoiding repeated JPEG
-  degradation. Camera-side processing or compressed transport, if used by
-  the camera, has already occurred before the app receives the frame.
+- Successful export opens the saved folder and releases the original captures
+  and review thumbnails. The label and selected directory stay in place for
+  the next set. If opening the folder fails, the exported files remain saved
+  and the status shows their location. Export failure retains the uncompressed
+  originals for retry. Camera-side processing or compressed transport, if used
+  by the camera, has already occurred before the app receives the frame.
 - Frame rotation and mirroring metadata are applied to snapshots so they
   match native presentation. Native row padding is removed when storing RGB
   pixels, preventing incorrectly packed rows in captured images.

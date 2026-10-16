@@ -94,6 +94,8 @@ jobs:
           Windows: extract the ZIP, then run Create-Desktop-Shortcut.cmd to add the app and its icon to your desktop.
           Linux: use the AppImage, or extract the portable TAR.GZ and run create-desktop-shortcut.sh. Packages target Intel/AMD 64-bit systems; Linux requires glibc 2.35 or newer.
           Python is included. Compression is applied only during JPEG export.
+          Space captures only while the app window is active, except when typing in text fields.
+          Successful exports open the saved image folder and clear the photo list. The last export directory is remembered between launches.
           NOTES
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" WebcamCapture-Windows-x64.zip WebcamCapture-Linux-x86_64.AppImage WebcamCapture-Linux-x86_64.tar.gz SHA256SUMS.txt --clobber

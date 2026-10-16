@@ -11,8 +11,8 @@ import threading
 import time
 from typing import Callable
 
-from PySide6.QtCore import QEvent, QLibraryInfo, QPluginLoader, QTimer, Qt, Slot
-from PySide6.QtGui import QCloseEvent, QIcon, QImage, QPixmap, QTransform
+from PySide6.QtCore import QEvent, QLibraryInfo, QPluginLoader, QSettings, QTimer, Qt, QUrl, Slot
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut, QTransform
 from PySide6.QtMultimedia import QCamera, QCameraFormat, QMediaCaptureSession, QMediaDevices, QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -92,8 +92,10 @@ def thumbnail_pixmap(photo: CapturedPhoto) -> QPixmap:
 
 
 class WebcamApp(QMainWindow):
-    def __init__(self, *, devices=None, backend_name: str = "Qt default") -> None:
+    def __init__(self, *, devices=None, backend_name: str = "Qt default",
+                 settings: QSettings | None = None) -> None:
         super().__init__()
+        self.settings = settings if settings is not None else QSettings("WebcamCapture", "WebcamCapture")
         self.session = CaptureSet()
         self.camera: QCamera | None = None
         self.formats: list[QCameraFormat] = []
@@ -205,7 +207,7 @@ class WebcamApp(QMainWindow):
         split.setSizes([760, 290])
         layout.addWidget(split, 1)
         capture_row = QHBoxLayout()
-        self.capture_button = QPushButton("Capture photo")
+        self.capture_button = QPushButton("Capture photo (Space)")
         self.capture_button.clicked.connect(self.capture)
         capture_row.addWidget(self.capture_button)
         capture_row.addWidget(QLabel("Captures stay uncompressed. JPEG encoding runs only at export."))
@@ -217,6 +219,8 @@ class WebcamApp(QMainWindow):
         form.addRow("Set label", self.label_input)
         directory_row = QHBoxLayout()
         self.directory_input = QLineEdit()
+        self.directory_input.setText(self.settings.value("export_directory", "", type=str))
+        self.directory_input.editingFinished.connect(self._remember_export_directory)
         directory_row.addWidget(self.directory_input)
         self.browse_button = QPushButton("Browse...")
         self.browse_button.clicked.connect(self.browse)
@@ -233,6 +237,12 @@ class WebcamApp(QMainWindow):
         self.status = QLabel("Select your camera and a supported mode, then open it.")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.capture_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        self.capture_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.capture_shortcut.setAutoRepeat(False)
+        self.capture_shortcut.activated.connect(self._capture_from_shortcut)
+        QApplication.instance().focusChanged.connect(self._update_capture_shortcut)
+        self._update_capture_shortcut()
         self._sync_controls()
 
     def refresh_devices(self, devices=None) -> None:
@@ -421,6 +431,18 @@ class WebcamApp(QMainWindow):
                 self.results.put((kind, None, str(error)))
         threading.Thread(target=run, daemon=True, name=kind).start()
 
+    def _update_capture_shortcut(self, *args) -> None:
+        # Leave spaces available for labels and directory names.
+        self.capture_shortcut.setEnabled(not isinstance(QApplication.focusWidget(), QLineEdit))
+
+    def _capture_from_shortcut(self) -> None:
+        if (not self.isVisible() or not self.isActiveWindow() or self.isMinimized()
+                or QApplication.activeModalWidget() is not None
+                or QApplication.activePopupWidget() is not None
+                or isinstance(QApplication.focusWidget(), QLineEdit)):
+            return
+        self.capture()
+
     def capture(self) -> None:
         if self.busy or len(self.session.photos) >= MAX_PHOTOS:
             return
@@ -475,9 +497,25 @@ class WebcamApp(QMainWindow):
         self.status.setText("Set cleared. Ready for new photos.")
 
     def browse(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Choose export directory")
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose export directory", self.directory_input.text().strip())
         if directory:
             self.directory_input.setText(directory)
+            self._remember_export_directory()
+
+    def _remember_export_directory(self) -> None:
+        value = self.directory_input.text().strip()
+        if not value:
+            return
+        try:
+            directory = Path(value).expanduser()
+            if not directory.is_dir():
+                return
+            resolved = str(directory.resolve())
+        except OSError:
+            return
+        self.settings.setValue("export_directory", resolved)
+        self.settings.sync()
 
     def export(self) -> None:
         if self.busy or not self.session.photos:
@@ -492,6 +530,7 @@ class WebcamApp(QMainWindow):
         if not self.directory_input.text().strip():
             return
         destination = Path(self.directory_input.text().strip())
+        self._remember_export_directory()
         photos = tuple(self.session.photos)
         progress = lambda current, total: self.results.put(("progress", (current, total), None))
         self.status.setText("Compressing and exporting photos...")
@@ -513,8 +552,12 @@ class WebcamApp(QMainWindow):
                     self.status.setText("Set complete. Label it and export." if len(self.session.photos) == 15
                                         else "Full-resolution photo captured without JPEG compression.")
                 else:
-                    self.session.mark_exported()
-                    self.status.setText(f"Exported {len(self.session.photos)} photos to {result}")
+                    count = len(self.session.photos)
+                    self.session.clear()
+                    self._refresh_photos()
+                    self.status.setText(f"Exported {count} photos to {result}. Ready for a new set.")
+                    if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(result))):
+                        self.status.setText(f"Exported {count} photos to {result}. Open this folder manually.")
                 self._sync_controls()
         except queue.Empty:
             pass
@@ -527,6 +570,7 @@ class WebcamApp(QMainWindow):
         if self.session.dirty and not self._confirm_discard("Unexported captures"):
             event.ignore()
             return
+        self._remember_export_directory()
         self._drain_timer.stop()
         self._stats_timer.stop()
         self.stop_camera()

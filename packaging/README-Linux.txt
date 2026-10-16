@@ -20,3 +20,6 @@ If FUSE is unavailable, use the portable TAR.GZ package, or launch:
 Close other camera applications. Select a camera and a supported video mode,
 then Open camera. Capture up to 15 images, enter a label, choose an export
 directory, and Export set. Compression is applied only during export.
+Space also captures while the app window is active, except in text fields.
+After successful export, the image folder opens and the photo list clears.
+The last selected export directory is remembered when you reopen the app.

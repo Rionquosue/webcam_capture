@@ -11,6 +11,9 @@ Moving the app folder requires running the shortcut installer again.
 Close other camera applications before opening the camera. Select the camera
 and its supported video mode, then Open camera. Capture up to 15 images,
 enter a set label, select an export directory, and Export set.
+Space also captures while the app window is active, except in text fields.
+After successful export, the image folder opens and the photo list clears.
+The last selected export directory is remembered when you reopen the app.
 
 Captures stay at full stream resolution in memory. JPEG compression and size
 reduction happen only during export. Each JPEG is below 2,000,000 bytes.

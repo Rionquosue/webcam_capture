@@ -8,13 +8,15 @@ import sys
 import tempfile
 import time
 import unittest
+import weakref
 from unittest.mock import Mock, patch
 
 from PIL import Image
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QKeyEvent
 from PySide6.QtMultimedia import QCamera, QVideoFrame, QVideoFrameFormat, QtVideo
-from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QDialog, QWidget
 
 from capture_core import compress_jpeg
 from webcam_capture import WebcamApp, capture_from_image, configure_backend, frame_image, preferred_format
@@ -37,10 +39,16 @@ class NativeVideoTests(unittest.TestCase):
         cls.application.setQuitOnLastWindowClosed(False)
 
     def setUp(self):
-        self.window = WebcamApp(devices=[])
+        self.temporary = tempfile.TemporaryDirectory()
+        preferences = tempfile.TemporaryDirectory()
+        self.addCleanup(preferences.cleanup)
+        self.settings = QSettings(str(Path(preferences.name) / "preferences.ini"), QSettings.Format.IniFormat)
+        opener = patch("webcam_capture.QDesktopServices.openUrl", return_value=True)
+        self.open_folder = opener.start()
+        self.addCleanup(opener.stop)
+        self.window = WebcamApp(devices=[], settings=self.settings)
         self.window.show()
         self.application.processEvents()
-        self.temporary = tempfile.TemporaryDirectory()
 
     def tearDown(self):
         self.wait_for(lambda: not self.window.busy)
@@ -151,8 +159,16 @@ class NativeVideoTests(unittest.TestCase):
             encoder.assert_called_once()
             self.assertEqual(photo.rgb, original)
             self.assertFalse(self.window.session.dirty)
+            self.assertEqual(self.window.session.photos, [])
+            self.assertEqual(self.window.photo_list.count(), 0)
+            self.assertEqual(self.window.count.text(), "0 / 15 photos")
+            self.assertTrue(self.window.review.pixmap().isNull())
+            self.assertFalse(self.window.export_button.isEnabled())
             output = list(Path(self.temporary.name).glob("*/*.jpg"))
             self.assertEqual(len(output), 1)
+            self.open_folder.assert_called_once()
+            self.assertEqual(Path(self.open_folder.call_args.args[0].toLocalFile()), output[0].parent)
+            self.assertEqual(self.settings.value("export_directory"), str(Path(self.temporary.name).resolve()))
             self.assertLess(output[0].stat().st_size, 2_000_000)
             with Image.open(output[0]) as image:
                 self.assertEqual(image.size, (1920, 1080))
@@ -188,9 +204,118 @@ class NativeVideoTests(unittest.TestCase):
         self.assertTrue(self.window.session.dirty)
         self.assertEqual(self.window.session.photos[0].rgb, original)
         self.assertEqual(list(Path(self.temporary.name).iterdir()), [])
+        self.open_folder.assert_not_called()
         self.window.export()
         self.wait_for(lambda: not self.window.busy)
         self.assertFalse(self.window.session.dirty)
+        self.assertEqual(self.window.session.photos, [])
+        self.open_folder.assert_called_once()
+
+    def test_successful_export_releases_captures_even_if_folder_cannot_open(self):
+        self.capture_one()
+        original = weakref.ref(self.window.session.photos[0])
+        self.window.label_input.setText("Folder open failure")
+        self.window.directory_input.setText(self.temporary.name)
+        self.open_folder.return_value = False
+        self.window.export()
+        self.wait_for(lambda: not self.window.busy)
+        self.wait_for(lambda: original() is None)
+        self.assertEqual(self.window.photo_list.count(), 0)
+        self.assertIn("Open this folder manually", self.window.status.text())
+        self.assertEqual(len(list(Path(self.temporary.name).glob("*/*.jpg"))), 1)
+
+    def activate_capture_window(self):
+        self.window.showNormal()
+        self.window.activateWindow()
+        self.window.capture_button.setFocus()
+        self.application.processEvents()
+        self.assertTrue(self.window.isActiveWindow())
+
+    def test_space_captures_once_without_keyboard_auto_repeat(self):
+        self.send_frame(width=320, height=180)
+        self.activate_capture_window()
+        QTest.keyClick(self.window.capture_button, Qt.Key.Key_Space)
+        self.wait_for(lambda: not self.window.busy)
+        self.assertEqual(len(self.window.session.photos), 1)
+        with patch.object(self.window, "capture") as capture:
+            for _ in range(5):
+                event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Space,
+                                  Qt.KeyboardModifier.NoModifier, " ", True, 1)
+                self.application.sendEvent(self.window.capture_button, event)
+            self.application.processEvents()
+            capture.assert_not_called()
+
+    def test_space_remains_text_in_label_and_directory_fields(self):
+        self.send_frame(width=320, height=180)
+        self.activate_capture_window()
+        with patch.object(self.window, "capture") as capture:
+            for field in (self.window.label_input, self.window.directory_input):
+                field.setFocus()
+                self.application.processEvents()
+                QTest.keyClicks(field, "Text with spaces")
+                self.assertEqual(field.text(), "Text with spaces")
+            capture.assert_not_called()
+
+    def test_space_does_not_capture_with_another_window_active_or_app_hidden(self):
+        self.send_frame(width=320, height=180)
+        self.activate_capture_window()
+        other = QWidget()
+        try:
+            other.show()
+            other.activateWindow()
+            self.application.processEvents()
+            self.assertFalse(self.window.isActiveWindow())
+            with patch.object(self.window, "capture") as capture:
+                QTest.keyClick(other, Qt.Key.Key_Space)
+                self.window._capture_from_shortcut()
+                self.window.showMinimized()
+                self.application.processEvents()
+                self.window._capture_from_shortcut()
+                self.window.hide()
+                QTest.keyClick(self.window, Qt.Key.Key_Space)
+                self.window._capture_from_shortcut()
+                capture.assert_not_called()
+        finally:
+            other.close()
+            other.deleteLater()
+
+    def test_space_does_not_capture_behind_a_modal_dialog(self):
+        self.send_frame(width=320, height=180)
+        self.activate_capture_window()
+        dialog = QDialog(self.window)
+        try:
+            dialog.setModal(True)
+            dialog.show()
+            self.application.processEvents()
+            with patch.object(self.window, "capture") as capture:
+                QTest.keyClick(dialog, Qt.Key.Key_Space)
+                self.window._capture_from_shortcut()
+                capture.assert_not_called()
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+
+    def test_browse_persists_parent_directory_for_a_new_window(self):
+        with patch("webcam_capture.QFileDialog.getExistingDirectory", return_value=self.temporary.name):
+            self.window.browse()
+        settings = QSettings(self.settings.fileName(), QSettings.Format.IniFormat)
+        reopened = WebcamApp(devices=[], settings=settings)
+        try:
+            self.assertEqual(reopened.directory_input.text(), str(Path(self.temporary.name).resolve()))
+        finally:
+            reopened.close()
+            reopened.deleteLater()
+
+    def test_typed_directory_is_saved_on_close_but_invalid_edits_do_not_replace_it(self):
+        self.window.directory_input.setText(self.temporary.name)
+        self.assertTrue(self.window.close())
+        settings = QSettings(self.settings.fileName(), QSettings.Format.IniFormat)
+        expected = str(Path(self.temporary.name).resolve())
+        self.assertEqual(settings.value("export_directory"), expected)
+        self.window.directory_input.setText(str(Path(self.temporary.name) / "does-not-exist"))
+        self.window._remember_export_directory()
+        settings.sync()
+        self.assertEqual(settings.value("export_directory"), expected)
 
     def test_stop_and_stale_frames_disable_capture(self):
         self.send_frame()
