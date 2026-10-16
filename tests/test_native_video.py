@@ -167,7 +167,7 @@ class NativeVideoTests(unittest.TestCase):
             output = list(Path(self.temporary.name).glob("*/*.jpg"))
             self.assertEqual(len(output), 1)
             self.open_folder.assert_called_once()
-            self.assertEqual(Path(self.open_folder.call_args.args[0].toLocalFile()), output[0].parent)
+            self.assertTrue(Path(self.open_folder.call_args.args[0].toLocalFile()).samefile(output[0].parent))
             self.assertEqual(self.settings.value("export_directory"), str(Path(self.temporary.name).resolve()))
             self.assertLess(output[0].stat().st_size, 2_000_000)
             with Image.open(output[0]) as image:
