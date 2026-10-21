@@ -111,9 +111,9 @@ remembered, rather than the newly created image-set subfolder.
 
 ### Directory bookmarks
 
-The export controls occupy the left 75% of the bottom row. **Bookmarked
-directories** is on the right. Select an export directory, click **Add current
-directory**, edit the name in the inline panel, then **Save** or **Cancel**.
+The export controls occupy the left 75% of the bottom row. **Bookmarks** is on
+the right. Select an export directory, click **Add bookmark**, edit the name
+in the inline panel, then **Save** or **Cancel**.
 Saved bookmarks remain available between launches. Click a bookmark to fill
 the Directory field; hover over its name to see the saved path. Bookmark names
 are independent of the Set label and do not affect export naming or behavior.
