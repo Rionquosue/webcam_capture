@@ -109,6 +109,19 @@ The last valid export directory is remembered between launches. Both Browse
 and typed directory paths are supported. The selected parent directory is
 remembered, rather than the newly created image-set subfolder.
 
+### Directory bookmarks
+
+The export controls occupy the left 75% of the bottom row. **Bookmarked
+directories** is on the right. Select an export directory, click **Add current
+directory**, edit the name in the inline panel, then **Save** or **Cancel**.
+Saved bookmarks remain available between launches. Click a bookmark to fill
+the Directory field; hover over its name to see the saved path. Bookmark names
+are independent of the Set label and do not affect export naming or behavior.
+
+Press **Escape** to deselect fields and lists and return focus to capture,
+then press **Space** to take a photo. Escape also cancels an unfinished
+bookmark. It does not erase the export label or directory field.
+
 The app prefers the supplied webcam's USB vendor/product pair `1BCF:0050`
 when the backend exposes it in the device ID. The hardware ID does not specify
 the camera's supported resolutions or frame rates; these are read at runtime.

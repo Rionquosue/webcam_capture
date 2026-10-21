@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import queue
@@ -16,9 +17,9 @@ from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon, QImage, QKeySequ
 from PySide6.QtMultimedia import QCamera, QCameraFormat, QMediaCaptureSession, QMediaDevices, QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QListWidget, QMainWindow, QMessageBox, QPushButton,
-    QSizePolicy, QSplitter, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
+    QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 from capture_core import CaptureSet, CapturedPhoto, MAX_PHOTOS, export_photos, safe_label
 
@@ -96,6 +97,8 @@ class WebcamApp(QMainWindow):
                  settings: QSettings | None = None) -> None:
         super().__init__()
         self.settings = settings if settings is not None else QSettings("WebcamCapture", "WebcamCapture")
+        self.bookmarks = self._load_bookmarks()
+        self._pending_bookmark_directory: str | None = None
         self.session = CaptureSet()
         self.camera: QCamera | None = None
         self.formats: list[QCameraFormat] = []
@@ -131,6 +134,7 @@ class WebcamApp(QMainWindow):
         self.resize(1120, 800)
         self.setMinimumSize(880, 680)
         center = QWidget(self)
+        center.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.setCentralWidget(center)
         layout = QVBoxLayout(center)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -233,7 +237,43 @@ class WebcamApp(QMainWindow):
         self.export_button.clicked.connect(self.export)
         export_row.addWidget(self.export_button)
         form.addRow(export_row)
-        layout.addWidget(export_box)
+        self.export_box = export_box
+        self.bookmark_box = QGroupBox("Bookmarked directories")
+        bookmarks_layout = QVBoxLayout(self.bookmark_box)
+        self.bookmark_stack = QStackedWidget()
+        self.bookmark_stack.setFixedHeight(100)
+        self.bookmark_list = QListWidget()
+        self.bookmark_list.setMinimumWidth(0)
+        self.bookmark_list.itemClicked.connect(self._select_bookmark)
+        self.bookmark_stack.addWidget(self.bookmark_list)
+        self.bookmark_editor = QFrame()
+        self.bookmark_editor.setFrameShape(QFrame.Shape.StyledPanel)
+        editor_layout = QVBoxLayout(self.bookmark_editor)
+        editor_layout.setContentsMargins(8, 8, 8, 8)
+        editor_layout.addWidget(QLabel("Bookmark name"))
+        self.bookmark_name_input = QLineEdit()
+        self.bookmark_name_input.textChanged.connect(self._sync_bookmark_controls)
+        self.bookmark_name_input.returnPressed.connect(self._save_bookmark)
+        editor_layout.addWidget(self.bookmark_name_input)
+        editor_actions = QHBoxLayout()
+        self.bookmark_cancel_button = QPushButton("Cancel")
+        self.bookmark_cancel_button.clicked.connect(self._cancel_bookmark)
+        editor_actions.addWidget(self.bookmark_cancel_button)
+        self.bookmark_save_button = QPushButton("Save")
+        self.bookmark_save_button.clicked.connect(self._save_bookmark)
+        editor_actions.addWidget(self.bookmark_save_button)
+        editor_layout.addLayout(editor_actions)
+        self.bookmark_stack.addWidget(self.bookmark_editor)
+        bookmarks_layout.addWidget(self.bookmark_stack, 1)
+        self.bookmark_add_button = QPushButton("Add current directory")
+        self.bookmark_add_button.clicked.connect(self._begin_bookmark)
+        bookmarks_layout.addWidget(self.bookmark_add_button)
+        self.directory_input.textChanged.connect(self._sync_bookmark_controls)
+        export_and_bookmarks = QHBoxLayout()
+        export_and_bookmarks.addWidget(export_box, 3)
+        export_and_bookmarks.addWidget(self.bookmark_box, 1)
+        layout.addLayout(export_and_bookmarks)
+        self._refresh_bookmarks()
         self.status = QLabel("Select your camera and a supported mode, then open it.")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -241,9 +281,98 @@ class WebcamApp(QMainWindow):
         self.capture_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.capture_shortcut.setAutoRepeat(False)
         self.capture_shortcut.activated.connect(self._capture_from_shortcut)
+        self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self.escape_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.escape_shortcut.setAutoRepeat(False)
+        self.escape_shortcut.activated.connect(self._clear_field_focus)
         QApplication.instance().focusChanged.connect(self._update_capture_shortcut)
         self._update_capture_shortcut()
         self._sync_controls()
+
+    def _load_bookmarks(self) -> list[dict[str, str]]:
+        try:
+            entries = json.loads(self.settings.value("directory_bookmarks", "[]", type=str))
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(entries, list):
+            return []
+        return [{"name": entry["name"], "directory": entry["directory"]}
+                for entry in entries if isinstance(entry, dict)
+                and isinstance(entry.get("name"), str) and entry["name"].strip()
+                and isinstance(entry.get("directory"), str) and entry["directory"].strip()]
+
+    def _refresh_bookmarks(self) -> None:
+        self.bookmark_list.clear()
+        for bookmark in self.bookmarks:
+            item = QListWidgetItem(bookmark["name"])
+            item.setData(Qt.ItemDataRole.UserRole, bookmark["directory"])
+            item.setToolTip(bookmark["directory"])
+            self.bookmark_list.addItem(item)
+
+    def _sync_bookmark_controls(self, *args) -> None:
+        self.bookmark_list.setEnabled(not self.busy)
+        self.bookmark_editor.setEnabled(not self.busy)
+        self.bookmark_add_button.setEnabled(not self.busy and self._pending_bookmark_directory is None
+                                            and bool(self.directory_input.text().strip()))
+        self.bookmark_save_button.setEnabled(not self.busy and bool(self.bookmark_name_input.text().strip()))
+
+    def _begin_bookmark(self) -> None:
+        if self.busy or self._pending_bookmark_directory is not None:
+            return
+        value = self.directory_input.text().strip()
+        try:
+            directory = Path(value).expanduser()
+            if not value or not directory.is_dir():
+                raise ValueError
+            directory = directory.resolve()
+        except (OSError, ValueError):
+            self.status.setText("Choose an existing export directory before adding a bookmark.")
+            return
+        self._pending_bookmark_directory = str(directory)
+        self.bookmark_editor.setToolTip(str(directory))
+        self.bookmark_name_input.setText(directory.name or str(directory))
+        self.bookmark_stack.setCurrentWidget(self.bookmark_editor)
+        self.bookmark_name_input.setFocus()
+        self.bookmark_name_input.selectAll()
+        self._sync_bookmark_controls()
+
+    def _cancel_bookmark(self) -> None:
+        self._pending_bookmark_directory = None
+        self.bookmark_stack.setCurrentWidget(self.bookmark_list)
+        self.bookmark_name_input.clear()
+        self.bookmark_list.setFocus()
+        self._sync_bookmark_controls()
+
+    def _save_bookmark(self) -> None:
+        name = self.bookmark_name_input.text().strip()
+        if self.busy or not name or self._pending_bookmark_directory is None:
+            return
+        self.bookmarks.append({"name": name, "directory": self._pending_bookmark_directory})
+        self.settings.setValue("directory_bookmarks", json.dumps(self.bookmarks, ensure_ascii=False))
+        self.settings.sync()
+        self._refresh_bookmarks()
+        self._cancel_bookmark()
+
+    def _select_bookmark(self, item: QListWidgetItem) -> None:
+        if self.busy:
+            return
+        self.directory_input.setText(item.data(Qt.ItemDataRole.UserRole))
+        self._remember_export_directory()
+
+    def _clear_field_focus(self) -> None:
+        if (not self.isVisible() or not self.isActiveWindow()
+                or QApplication.activeModalWidget() is not None
+                or QApplication.activePopupWidget() is not None):
+            return
+        if self._pending_bookmark_directory is not None:
+            self._cancel_bookmark()
+        for field in self.findChildren(QLineEdit):
+            field.deselect()
+        for listing in (self.photo_list, self.bookmark_list):
+            listing.clearSelection()
+            listing.setCurrentRow(-1)
+        self.centralWidget().setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self._update_capture_shortcut()
 
     def refresh_devices(self, devices=None) -> None:
         previous = self.device_input.currentData()
@@ -420,6 +549,7 @@ class WebcamApp(QMainWindow):
         self.clear_button.setEnabled(bool(self.session.photos) and not self.busy)
         for widget in (self.label_input, self.directory_input, self.browse_button):
             widget.setEnabled(not self.busy)
+        self._sync_bookmark_controls()
 
     def _submit(self, kind: str, operation: Callable) -> None:
         self.busy = True

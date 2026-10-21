@@ -317,6 +317,145 @@ class NativeVideoTests(unittest.TestCase):
         settings.sync()
         self.assertEqual(settings.value("export_directory"), expected)
 
+    def add_bookmark(self, name, directory):
+        self.window.directory_input.setText(str(directory))
+        self.window.bookmark_add_button.click()
+        self.assertIs(self.window.bookmark_stack.currentWidget(), self.window.bookmark_editor)
+        self.window.bookmark_name_input.setText(name)
+        self.window.bookmark_save_button.click()
+
+    def click_bookmark(self, row=0):
+        item = self.window.bookmark_list.item(row)
+        QTest.mouseClick(self.window.bookmark_list.viewport(), Qt.MouseButton.LeftButton,
+                         pos=self.window.bookmark_list.visualItemRect(item).center())
+
+    def test_bookmarks_save_cancel_select_and_persist_without_changing_label(self):
+        original = Path(self.temporary.name).resolve()
+        other = original / "Other directory"
+        other.mkdir()
+        self.window.label_input.setText("Keep this label")
+        self.window.directory_input.setText(str(original))
+        self.window.bookmark_add_button.click()
+        self.window.bookmark_name_input.setText("Project A / photos & scans")
+        self.window.directory_input.setText(str(other))
+        self.window.bookmark_save_button.click()
+        self.assertEqual(self.window.bookmark_list.count(), 1)
+        self.assertEqual(self.window.directory_input.text(), str(other))
+        self.click_bookmark()
+        self.assertEqual(self.window.directory_input.text(), str(original))
+        self.assertEqual(self.window.label_input.text(), "Keep this label")
+        self.open_folder.assert_not_called()
+        self.window.bookmark_add_button.click()
+        self.window.bookmark_name_input.clear()
+        self.assertFalse(self.window.bookmark_save_button.isEnabled())
+        self.window.bookmark_name_input.setText("Cancelled bookmark")
+        self.window.bookmark_cancel_button.click()
+        self.assertEqual(self.window.bookmark_list.count(), 1)
+        reopened = WebcamApp(devices=[], settings=QSettings(self.settings.fileName(), QSettings.Format.IniFormat))
+        try:
+            item = reopened.bookmark_list.item(0)
+            self.assertEqual(item.text(), "Project A / photos & scans")
+            self.assertEqual(item.data(Qt.ItemDataRole.UserRole), str(original))
+            self.assertEqual(reopened.bookmark_list.count(), 1)
+        finally:
+            reopened.close()
+            reopened.deleteLater()
+
+    def test_bookmark_rejects_missing_directory_without_creating_it(self):
+        missing = Path(self.temporary.name) / "missing"
+        self.window.directory_input.setText(str(missing))
+        self.window.bookmark_add_button.click()
+        self.assertIs(self.window.bookmark_stack.currentWidget(), self.window.bookmark_list)
+        self.assertEqual(self.window.bookmark_list.count(), 0)
+        self.assertFalse(missing.exists())
+
+    def test_bookmark_name_does_not_change_export_folder_or_jpeg_names(self):
+        destination = Path(self.temporary.name) / "Output directory"
+        destination.mkdir()
+        self.add_bookmark("Completely different bookmark name", destination)
+        self.window.directory_input.setText(self.temporary.name)
+        self.click_bookmark()
+        self.window.label_input.setText("Actual set label")
+        self.capture_one()
+        self.window.export()
+        self.wait_for(lambda: not self.window.busy)
+        folders = list(destination.iterdir())
+        self.assertEqual(len(folders), 1)
+        self.assertTrue(folders[0].name.startswith("Actual set label_"))
+        self.assertEqual([path.name for path in folders[0].iterdir()], ["Actual set label_01.jpg"])
+        self.assertEqual(self.window.session.photos, [])
+        self.open_folder.assert_called_once()
+        self.assertTrue(Path(self.open_folder.call_args.args[0].toLocalFile()).samefile(folders[0]))
+
+    def test_escape_deselects_fields_without_changing_values_then_space_captures(self):
+        self.add_bookmark("Capture directory", self.temporary.name)
+        self.capture_one()
+        self.activate_capture_window()
+        self.click_bookmark()
+        self.window.label_input.setText("Preserve this label")
+        self.window.directory_input.selectAll()
+        self.window.label_input.setFocus()
+        self.window.label_input.selectAll()
+        self.application.processEvents()
+        directory = self.window.directory_input.text()
+        QTest.keyClick(self.window.label_input, Qt.Key.Key_Escape)
+        self.assertEqual(self.window.label_input.text(), "Preserve this label")
+        self.assertEqual(self.window.directory_input.text(), directory)
+        self.assertFalse(self.window.label_input.hasSelectedText())
+        self.assertFalse(self.window.directory_input.hasSelectedText())
+        self.assertEqual(self.window.photo_list.selectedItems(), [])
+        self.assertEqual(self.window.bookmark_list.selectedItems(), [])
+        self.assertIs(self.application.focusWidget(), self.window.centralWidget())
+        QTest.keyClick(self.window.centralWidget(), Qt.Key.Key_Space)
+        self.wait_for(lambda: not self.window.busy)
+        self.assertEqual(len(self.window.session.photos), 2)
+
+    def test_escape_cancels_inline_bookmark_editor_and_restores_space_capture(self):
+        self.send_frame(width=320, height=180)
+        self.activate_capture_window()
+        self.window.directory_input.setText(self.temporary.name)
+        self.window.bookmark_add_button.click()
+        QTest.keyClicks(self.window.bookmark_name_input, "Unsaved bookmark with spaces")
+        self.assertEqual(self.window.session.photos, [])
+        QTest.keyClick(self.window.bookmark_name_input, Qt.Key.Key_Escape)
+        self.assertIs(self.window.bookmark_stack.currentWidget(), self.window.bookmark_list)
+        self.assertEqual(self.window.bookmark_list.count(), 0)
+        QTest.keyClick(self.window.centralWidget(), Qt.Key.Key_Space)
+        self.wait_for(lambda: not self.window.busy)
+        self.assertEqual(len(self.window.session.photos), 1)
+
+    def test_bookmarks_use_right_quarter_of_export_row_with_editor_open_or_closed(self):
+        for width in (1120, 880):
+            self.window.resize(width, 800)
+            self.application.processEvents()
+            self.assertGreater(self.window.bookmark_box.x(), self.window.export_box.x())
+            total = self.window.export_box.width() + self.window.bookmark_box.width()
+            self.assertAlmostEqual(self.window.export_box.width() / total, .75, delta=.015)
+            self.window.directory_input.setText(self.temporary.name)
+            self.window.bookmark_add_button.click()
+            self.application.processEvents()
+            total = self.window.export_box.width() + self.window.bookmark_box.width()
+            self.assertAlmostEqual(self.window.export_box.width() / total, .75, delta=.015)
+            self.assertTrue(self.window.bookmark_save_button.isVisible())
+            self.assertTrue(self.window.bookmark_cancel_button.isVisible())
+            self.window.bookmark_cancel_button.click()
+
+    def test_bookmark_selection_does_not_change_directory_during_an_operation(self):
+        self.add_bookmark("Saved", self.temporary.name)
+        other = Path(self.temporary.name) / "Other"
+        other.mkdir()
+        self.window.directory_input.setText(str(other))
+        self.window.busy = True
+        try:
+            self.window._sync_controls()
+            self.assertFalse(self.window.bookmark_list.isEnabled())
+            self.assertFalse(self.window.bookmark_add_button.isEnabled())
+            self.window._select_bookmark(self.window.bookmark_list.item(0))
+            self.assertEqual(self.window.directory_input.text(), str(other))
+        finally:
+            self.window.busy = False
+            self.window._sync_controls()
+
     def test_stop_and_stale_frames_disable_capture(self):
         self.send_frame()
         self.window.last_frame_at = time.monotonic() - 3

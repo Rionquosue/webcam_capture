@@ -23,3 +23,8 @@ directory, and Export set. Compression is applied only during export.
 Space also captures while the app window is active, except in text fields.
 After successful export, the image folder opens and the photo list clears.
 The last selected export directory is remembered when you reopen the app.
+Use the Bookmarked directories panel to save a named shortcut to a directory.
+Click Add current directory, edit the name, and Save or Cancel in the panel.
+Click a saved bookmark to fill the Directory field. Export labels and file
+names are independent of bookmark names. Escape deselects fields so Space
+can capture again; it also cancels an unfinished bookmark.
