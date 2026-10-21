@@ -430,12 +430,16 @@ class NativeVideoTests(unittest.TestCase):
             self.application.processEvents()
             self.assertGreater(self.window.bookmark_box.x(), self.window.export_box.x())
             total = self.window.export_box.width() + self.window.bookmark_box.width()
-            self.assertAlmostEqual(self.window.export_box.width() / total, .75, delta=.015)
+            self.assertAlmostEqual(self.window.export_box.width() / total, .75, delta=.015,
+                                   msg=f"{width=}, export={self.window.export_box.size()}, "
+                                       f"bookmarks={self.window.bookmark_box.size()}")
             self.window.directory_input.setText(self.temporary.name)
             self.window.bookmark_add_button.click()
             self.application.processEvents()
             total = self.window.export_box.width() + self.window.bookmark_box.width()
-            self.assertAlmostEqual(self.window.export_box.width() / total, .75, delta=.015)
+            self.assertAlmostEqual(self.window.export_box.width() / total, .75, delta=.015,
+                                   msg=f"Editor open: {width=}, export={self.window.export_box.size()}, "
+                                       f"bookmarks={self.window.bookmark_box.size()}")
             self.assertTrue(self.window.bookmark_save_button.isVisible())
             self.assertTrue(self.window.bookmark_cancel_button.isVisible())
             self.window.bookmark_cancel_button.click()
